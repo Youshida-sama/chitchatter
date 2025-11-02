@@ -12,24 +12,44 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      # тут мы собс-на просто смотрим, что сервер жив и радуемся
+      - name: agent - get server status
+        uses: appleboy/ssh-action@master
         with:
-          node-version: 20
-          cache: 'npm'
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: neofetch && df -H / && free -m
 
-      - name: Build
-        env:
-          VITE_RTC_CONFIG_ENDPOINT: ${{ vars.VITE_RTC_CONFIG_ENDPOINT }}
-        run: |
-          npm ci
-          npm run build
-
-      - name: Deploy
-        uses: peaceiris/actions-gh-pages@v4
+      # тут мы ставим на github action ssh ключ, чтобы можно было пользоваться всякими командами а-ля rsync, scp и прочее
+      - name: agent - install ssh key
+        uses: shimataro/ssh-key-action@v2
         with:
-          deploy_key: ${{ secrets.DEPLOY_KEY }}
-          publish_dir: ./dist
-          force_orphan: true
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          known_hosts: unnecessary
+
+      # тут мы его устанавливаем
+      - name: agent - install ssh
+        run: ssh-keyscan -p 22 -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      # подчищаем за собой директорию на сервере
+      - name: agent - cleanup static folder
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: rm -rf /var/www/chat/**
+
+      # деплоим статику на сервер
+      - name: agent - deploy static
+        run: ls -la ./dist && rsync -avz -r -e "ssh -p 22" ./dist/ ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_HOST }}:/var/www/chat/
+
+      # смотрим, что статика действительно там
+      - name: agent - show deployed dir
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: ls -la /var/www/chat/
